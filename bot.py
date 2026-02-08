@@ -61,13 +61,13 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.HTML
         )
 
-        # 5 soniyadan keyin warning ham o‘chadi
+        # 15 soniyadan keyin warning ham o‘chadi
         await context.application.create_task(delete_later(warn, context))
 
 
 async def delete_later(msg, context):
     import asyncio
-    await asyncio.sleep(5)
+    await asyncio.sleep(15)
     try:
         await context.bot.delete_message(msg.chat_id, msg.message_id)
     except:
