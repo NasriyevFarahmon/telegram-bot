@@ -28,7 +28,7 @@ LINK_RE = re.compile(
 )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Салом! Бот фаол. Мен гуруҳдаги линк ва рекламаларни тозалайман.")
+    await update.message.reply_text("Салом! Ман барои нигоҳ доштани тартибот дар гурӯҳ фаъолият мекунам.Ман боти расмии @DehaiSarchashma мебошам.")
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -74,7 +74,7 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user = update.effective_user.mention_html()
             warn = await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=f"{user}, гуруҳда линк тарқатиш тақиқланган!",
+                text=f"{user}, фиристодани линк манъ аст! Ман боти расмии @DehaiSarchashma мебошам ва паёми шуморо нест кардам!",
                 parse_mode=ParseMode.HTML
             )
             # Ogohlantirishni 15 soniyadan keyin o'chirish
