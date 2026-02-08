@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 import logging
 from telegram import Update
 from telegram.constants import ParseMode
@@ -11,9 +12,9 @@ from telegram.ext import (
     filters,
 )
 
-# ===== Logs (Railway Logs'da ko‘rinadi) =====
+# === Logs (Railway Logs'da ko'rinadi) ===
 logging.basicConfig(
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger("antilink-bot")
@@ -22,141 +23,90 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN topilmadi")
 
-# Kuchliroq fallback regex (entities bo‘lmasa ham ushlaydi)
-LINK_RE = re.compile(
-    r"("
-    r"https?://\S+"
-    r"|www\.\S+"
-    r"|t\.me/\S+"
-    r"|telegram\.me/\S+"
-    r"|\b[a-z0-9-]+\.(?:com|ru|uz|net|org|info|io|me|tv|app|site|xyz)\b\S*"
-    r")",
-    re.IGNORECASE,
-)
-
-START_TEXT = """Салом! Ман боти расмии @DehaiSarchashma мебошам.
-
-Вазифаҳои ман:
-✅ Аз ғайриадминҳо фиристода шудани ҳама гуна линкҳоро нест мекунам (матн, видео, аудио, акс, ҳуҷҷат, voice, GIF — ҳатто дар caption).
-✅ Паёмҳои «даромад/баромад»-ро автоматӣ нест мекунам.
-"""
-
-WARN_TEXT = "шумо линк фиристодед. Ман боти расмии @DehaiSarchashma мебошам ва паёми шуморо нест кардам."
-
+# Kuchliroq Regex: Instagram, TikTok, Telegram va umumiy linklar uchun
+LINK_RE = re.compile(r"(https?://|t\.me|www\.|instagr\.am|instagram\.com|tiktok\.com)", re.IGNORECASE)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(START_TEXT)
+    await update.message.reply_text("Бот фаол! Гуруҳдаги линк ва рекламаларни тозалайман.")
 
-
-async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    admins = await context.bot.get_chat_administrators(chat_id)
-    return any(a.user.id == user_id for a in admins)
-
-
-def has_link(msg) -> bool:
-    """Entities + regex fallback bilan linkni aniqlaydi (text/caption)."""
-    if not msg:
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type == "private":
+        return True
+    try:
+        member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
+        return member.status in ("administrator", "creator")
+    except:
         return False
 
-    entities = (msg.entities or []) + (msg.caption_entities or [])
-    if any(e.type in ("url", "text_link") for e in entities):
-        return True
+async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Agar xabar guruhdan bo'lmasa yoki xabar bo'lmasa to'xtatamiz
+    if not update.message:
+        return
 
+    # Adminlarni tekshirish (Admin yuborgan link o'chmaydi)
+    if await is_admin(update, context):
+        return
+
+    msg = update.message
     text = msg.text or ""
     caption = msg.caption or ""
-    return bool(LINK_RE.search(text) or LINK_RE.search(caption))
 
+    # 1. Ko'rinmas linklarni (Hyperlinks) aniqlash
+    entities = (msg.entities or []) + (msg.caption_entities or [])
+    has_hidden_link = any(e.type in ("url", "text_link") for e in entities)
 
-async def delete_warning_job(context: ContextTypes.DEFAULT_TYPE):
-    data = context.job.data
+    # 2. Matn ichidagi oddiy linklarni aniqlash
+    has_regex_link = LINK_RE.search(text) or LINK_RE.search(caption)
+
+    if has_hidden_link or has_regex_link:
+        try:
+            await msg.delete()
+            
+            user = update.effective_user.mention_html()
+            warn = await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"{user}, гуруҳда линк тарқатиш тақиқланган!",
+                parse_mode=ParseMode.HTML
+            )
+            # 15 soniyadan keyin ogohlantirishni o'chirish
+            context.application.create_task(delete_later(warn, context))
+            logger.info(f"Link o'chirildi: User: {update.effective_user.id}")
+        except Exception as e:
+            logger.error(f"Xabar o'chirishda xatolik: {e}")
+
+async def delete_later(msg, context):
+    await asyncio.sleep(15)
     try:
-        await context.bot.delete_message(chat_id=data["chat_id"], message_id=data["message_id"])
-    except Exception:
+        await context.bot.delete_message(msg.chat_id, msg.message_id)
+    except:
         pass
 
-
-async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if not msg:
-        return
-
-    # Buyruqlarni tekshirmaymiz
-    if msg.text and msg.text.startswith("/"):
-        return
-
-    # Admin bo‘lsa tegmaymiz
+async def delete_status_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Guruhga kirdi-chiqdi xabarlarini o'chiradi"""
     try:
-        if await is_admin(update, context):
-            return
-    except Exception as e:
-        logger.exception("Admin check error: %s", e)
-        return
-
-    # Link bo‘lmasa tegmaymiz
-    if not has_link(msg):
-        return
-
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-    mention = user.mention_html()
-
-    # Linkli xabarni o‘chiramiz
-    try:
-        await msg.delete()
-        logger.info("Deleted link message in chat_id=%s from user_id=%s", chat_id, user.id)
-    except Exception as e:
-        logger.exception("FAILED to delete message in chat_id=%s: %s", chat_id, e)
-        return
-
-    # Ogohlantirish yuboramiz
-    warn_msg = await context.bot.send_message(
-        chat_id=chat_id,
-        text=f"{mention} {WARN_TEXT}",
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-    )
-
-    # 15 soniyadan keyin warning ham o‘chadi
-    context.job_queue.run_once(
-        delete_warning_job,
-        when=15,
-        data={"chat_id": warn_msg.chat_id, "message_id": warn_msg.message_id},
-    )
-
-
-async def delete_join_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kirdi/chiqdi service message’larini o‘chiradi."""
-    msg = update.message
-    if not msg:
-        return
-    try:
-        await msg.delete()
-    except Exception:
+        await update.message.delete()
+    except:
         pass
-
 
 def main():
+    # Botni yaratish
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # /start
+    # Buyruqlar
     app.add_handler(CommandHandler("start", start))
 
-    # join/leave
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, delete_join_leave))
-    app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, delete_join_leave))
+    # Kirdi-chiqdi xabarlarini o'chirish
+    app.add_handler(MessageHandler(filters.StatusUpdate.ALL, delete_status_updates))
 
-    # ✅ hamma xabar turlari (video/audio/photo/doc/voice/gif ham),
-    # lekin status update va command emas
-    app.add_handler(MessageHandler(filters.ALL & ~filters.StatusUpdate.ALL & ~filters.COMMAND, anti_link))
+    # ASOSIY: Barcha turdagi xabarlardan link qidirish (Rasm, Video, Audio, Hujjat, Matn)
+    # filters.ALL ishlatamiz, shunda hamma narsani tekshiradi
+    app.add_handler(MessageHandler(
+        (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE | filters.Document.ALL | filters.VIDEO_NOTE) & (~filters.COMMAND), 
+        anti_link
+    ))
 
-    logger.info("Bot started. Polling...")
-    app.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True
-    )
-
+    logger.info("Bot ishga tushdi...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
