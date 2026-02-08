@@ -14,20 +14,23 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN topilmadi")
 
-# Regex (fallback) — entity bo‘lmasa ham linkni ushlash uchun
-LINK_RE = re.compile(r"(https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+)", re.IGNORECASE)
+# Regex (fallback): entity bo‘lmasa ham linkni ushlash uchun
+LINK_RE = re.compile(
+    r"(https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+)",
+    re.IGNORECASE
+)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "Салом! Ман барои нигоҳ доштани тартибот дар гурӯҳ фаъолият мекунам.
+    text = """Салом! Ман барои нигоҳ доштани тартибот дар гурӯҳ фаъолият мекунам.
 
-Ман боти расмии @DehaiSarchashma мебошам."
-        "Вазифаҳои ман:
+Ман боти расмии @DehaiSarchashma мебошам.
+
+Вазифаҳои ман:
 ✅ Истинодҳо (линкҳо)-ро нест мекунам: Агар аз ҷониби ғайриадминҳо фиристода шаванд (дар матн, видео, аудио, акс ва шарҳи файлҳо).
 
-✅ Паёмҳои «даромад/баромад»-ро: Ба таври худкор (автоматӣ) аз гурӯҳ тоза мекунам."
-    )
+✅ Паёмҳои «даромад/баромад»-ро: Ба таври худкор (автоматӣ) аз гурӯҳ тоза мекунам.
+"""
     await update.message.reply_text(text)
 
 
@@ -39,7 +42,10 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
 
 
 def has_link(update: Update) -> bool:
-    """Text/caption ichida link bormi? (entities + regex)"""
+    """
+    Text/caption ichida link bormi? (entities + regex)
+    Video/audio/photo/document/voice caption ichidagi linkni ham ushlaydi.
+    """
     msg = update.message
     if not msg:
         return False
@@ -70,6 +76,10 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
 
+    # Buyruqlarni ( /start, /...) anti_link tekshirmasin
+    if update.message.text and update.message.text.startswith("/"):
+        return
+
     # Admin bo‘lsa tegmaymiz
     if await is_admin(update, context):
         return
@@ -90,7 +100,10 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Ogohlantirish yuboramiz
-    warn_text = f"{mention} фиристодани линк манъ аст! Ман боти расмии @DehaiSarchashma мебошам ва паёми шуморо нест кардам."
+    warn_text = (
+        f"{mention} фиристодани линк манъ аст!\n"
+        f"Ман боти расмии @DehaiSarchashma мебошам ва паёми шуморо нест кардам."
+    )
     warn_msg = await context.bot.send_message(
         chat_id=chat_id,
         text=warn_text,
@@ -98,7 +111,7 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True,
     )
 
-    # 10 soniyadan keyin ogohlantirishni ham o‘chirib yuboramiz (spam bo‘lmasin)
+    # 10 soniyadan keyin ogohlantirishni ham o‘chirib yuboramiz
     context.job_queue.run_once(
         delete_warning_job,
         when=10,
