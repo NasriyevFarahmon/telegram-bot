@@ -57,7 +57,7 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         warn = await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=f"{mention} шумо линк фиристодед. Паём нест карда шуд.",
+            text=f"{mention} шумо линк фиристодед. Ман боти расмии @DehaiSarchashma мебошам ва паёми шуморо нест кардам.",
             parse_mode=ParseMode.HTML
         )
 
