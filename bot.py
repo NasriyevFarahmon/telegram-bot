@@ -1,5 +1,6 @@
 import os
 import re
+import logging
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import (
@@ -10,16 +11,18 @@ from telegram.ext import (
     filters,
 )
 
+# ===== Logs (Railway Logs'da ko‘rinadi) =====
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger("antilink-bot")
+
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN topilmadi")
 
-# Kuchliroq fallback regex:
-# - https://...
-# - www....
-# - t.me/...
-# - telegram.me/...
-# - domain.tld/... (instagram.com, google.com, bit.ly, va h.k.)
+# Kuchliroq fallback regex (entities bo‘lmasa ham ushlaydi)
 LINK_RE = re.compile(
     r"("
     r"https?://\S+"
@@ -31,19 +34,23 @@ LINK_RE = re.compile(
     re.IGNORECASE,
 )
 
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = """Салом! Ман боти расмии @DehaiSarchashma мебошам.
+START_TEXT = """Салом! Ман боти расмии @DehaiSarchashma мебошам.
 
 Вазифаҳои ман:
-- Линкҳоро нест мекунам (аз ғайриадминҳо)
-- Паёмҳои даромад/баромадро нест мекунам"""
-    await update.message.reply_text(text)
+✅ Аз ғайриадминҳо фиристода шудани ҳама гуна линкҳоро нест мекунам (матн, видео, аудио, акс, ҳуҷҷат, voice, GIF — ҳатто дар caption).
+✅ Паёмҳои «даромад/баромад»-ро автоматӣ нест мекунам.
+"""
+
+WARN_TEXT = "шумо линк фиристодед. Ман боти расмии @DehaiSarchashma мебошам ва паёми шуморо нест кардам."
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(START_TEXT)
 
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
     admins = await context.bot.get_chat_administrators(chat_id)
     return any(a.user.id == user_id for a in admins)
 
@@ -63,7 +70,6 @@ def has_link(msg) -> bool:
 
 
 async def delete_warning_job(context: ContextTypes.DEFAULT_TYPE):
-    """15 soniyadan keyin ogohlantirishni o‘chiradi."""
     data = context.job.data
     try:
         await context.bot.delete_message(chat_id=data["chat_id"], message_id=data["message_id"])
@@ -80,31 +86,39 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if msg.text and msg.text.startswith("/"):
         return
 
-    # admin bo‘lsa tegmaymiz
-    if await is_admin(update, context):
+    # Admin bo‘lsa tegmaymiz
+    try:
+        if await is_admin(update, context):
+            return
+    except Exception as e:
+        logger.exception("Admin check error: %s", e)
         return
 
+    # Link bo‘lmasa tegmaymiz
     if not has_link(msg):
         return
 
+    chat_id = update.effective_chat.id
     user = update.effective_user
     mention = user.mention_html()
 
-    # Linkli xabarni o‘chir
+    # Linkli xabarni o‘chiramiz
     try:
         await msg.delete()
-    except Exception:
+        logger.info("Deleted link message in chat_id=%s from user_id=%s", chat_id, user.id)
+    except Exception as e:
+        logger.exception("FAILED to delete message in chat_id=%s: %s", chat_id, e)
         return
 
-    # Ogohlantirish yubor
+    # Ogohlantirish yuboramiz
     warn_msg = await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=f"{mention} шумо линк фиристодед. Ман боти расмии @DehaiSarchashma мебошам ва паёми шуморо нест кардам.",
+        chat_id=chat_id,
+        text=f"{mention} {WARN_TEXT}",
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
 
-    # 15 soniyadan keyin warning ham o‘chadi (JobQueue barqarorroq)
+    # 15 soniyadan keyin warning ham o‘chadi
     context.job_queue.run_once(
         delete_warning_job,
         when=15,
@@ -112,27 +126,36 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def delete_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message:
-        try:
-            await update.message.delete()
-        except Exception:
-            pass
+async def delete_join_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kirdi/chiqdi service message’larini o‘chiradi."""
+    msg = update.message
+    if not msg:
+        return
+    try:
+        await msg.delete()
+    except Exception:
+        pass
 
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
+    # /start
     app.add_handler(CommandHandler("start", start))
 
     # join/leave
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, delete_join))
-    app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, delete_join))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, delete_join_leave))
+    app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, delete_join_leave))
 
-    # ✅ MUHIM: hamma xabar turlari, lekin status update va command emas
+    # ✅ hamma xabar turlari (video/audio/photo/doc/voice/gif ham),
+    # lekin status update va command emas
     app.add_handler(MessageHandler(filters.ALL & ~filters.StatusUpdate.ALL & ~filters.COMMAND, anti_link))
 
-    app.run_polling()
+    logger.info("Bot started. Polling...")
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True
+    )
 
 
 if __name__ == "__main__":
