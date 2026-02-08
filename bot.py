@@ -12,7 +12,7 @@ from telegram.ext import (
     filters,
 )
 
-# Logging sozlamalari (Railway loglarida ko'rish uchun)
+# Logging sozlamalari
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     level=logging.INFO,
@@ -21,7 +21,6 @@ logger = logging.getLogger("antilink-bot")
 
 TOKEN = os.getenv("BOT_TOKEN")
 
-# Linklar uchun regex
 LINK_RE = re.compile(
     r"(https?://|www\.|t\.me/|telegram\.me/|instagr\.am/|instagram\.com/|tiktok\.com/)",
     re.IGNORECASE,
@@ -32,10 +31,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        # 1. Agar xabar kanal nomidan yuborilgan bo'lsa (Linked Channel)
+        if update.effective_message.sender_chat:
+            return True
+            
         if update.effective_chat.type == "private":
             return True
+            
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
+        
+        # 2. Anonim adminlarni tekshirish (Group Anonymous Bot)
+        if user_id == 1087968824: # Telegramning anonim admin IDsi
+            return True
+
         member = await context.bot.get_chat_member(chat_id, user_id)
         return member.status in ("administrator", "creator")
     except Exception as e:
@@ -43,7 +52,6 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return False
 
 def get_entities(msg):
-    """Xatoni oldini olish uchun entitiesni list ko'rinishida yig'ish."""
     all_entities = []
     if msg.entities:
         all_entities.extend(list(msg.entities))
@@ -56,11 +64,10 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         return
 
-    # Admin bo'lsa tekshirmaymiz
+    # ADMIN VA KANAL XABARLARINI O'TKAZIB YUBORISH
     if await is_admin(update, context):
         return
 
-    # Linklarni tekshirish (Logingizdagi xato shu yerda tuzatildi)
     entities = get_entities(msg)
     has_hidden_link = any(e.type in ("url", "text_link") for e in entities)
     
@@ -77,7 +84,6 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=f"{user}, фиристодани линк манъ аст! Ман боти расмии @DehaiSarchashma мебошам ва паёми шуморо нест кардам!",
                 parse_mode=ParseMode.HTML
             )
-            # Ogohlantirishni 15 soniyadan keyin o'chirish
             asyncio.create_task(delete_after_delay(warn, 15))
             logger.info(f"Link o'chirildi: User ID {update.effective_user.id}")
         except Exception as e:
@@ -91,7 +97,6 @@ async def delete_after_delay(msg, delay):
         pass
 
 async def delete_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kirdi-chiqdi xabarlarini o'chiradi."""
     try:
         await update.message.delete()
     except:
@@ -107,7 +112,6 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.StatusUpdate.ALL, delete_status))
     
-    # Barcha media va matnlarni tekshirish (Linklar uchun)
     app.add_handler(MessageHandler(
         filters.ALL & ~filters.COMMAND & ~filters.StatusUpdate.ALL, 
         anti_link
