@@ -8,24 +8,24 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN topilmadi")
 
-# har qanday linkni aniqlaydi
-link_pattern = re.compile(
-    r"(https?://|www\.|t\.me/|telegram\.me/)",
+# HAR QANDAY LINK
+LINK_RE = re.compile(
+    r"(https?://\S+|www\.\S+|t\.me/\S+)",
     re.IGNORECASE
 )
 
-# admin tekshiruv
+# ADMIN TEKSHIRUV
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
     admins = await context.bot.get_chat_administrators(chat_id)
-    admin_ids = [admin.user.id for admin in admins]
+    admin_ids = [a.user.id for a in admins]
 
     return user_id in admin_ids
 
-# link o‘chirish
-async def delete_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# LINK O‘CHIRISH
+async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
 
@@ -35,14 +35,14 @@ async def delete_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
     caption = update.message.caption or ""
 
-    if link_pattern.search(text) or link_pattern.search(caption):
+    if LINK_RE.search(text) or LINK_RE.search(caption):
         try:
             await update.message.delete()
         except:
             pass
 
-# join/leave o‘chirish
-async def delete_join_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# KIRDI/CHIQDI O‘CHIRISH
+async def delete_service(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.delete()
     except:
@@ -51,11 +51,11 @@ async def delete_join_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # barcha turdagi xabarlar
-    app.add_handler(MessageHandler(filters.ALL, delete_links))
+    # BARCHA XABARLAR (video/audio ham)
+    app.add_handler(MessageHandler(filters.ALL, anti_link))
 
-    # kirdi/chiqdi
-    app.add_handler(MessageHandler(filters.StatusUpdate.ALL, delete_join_leave))
+    # JOIN/LEAVE
+    app.add_handler(MessageHandler(filters.StatusUpdate.ALL, delete_service))
 
     app.run_polling()
 
