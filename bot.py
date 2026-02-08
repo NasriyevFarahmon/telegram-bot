@@ -43,10 +43,18 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_admin(update, context):
         return
 
-    text = update.message.text or ""
-    caption = update.message.caption or ""
+    msg = update.message
+    text = msg.text or ""
+    caption = msg.caption or ""
 
-    if LINK_RE.search(text) or LINK_RE.search(caption):
+    # ✅ YANGI: entities orqali linkni 100% ushlash (text/caption, video/audio/rasm caption ham)
+    entities = (msg.entities or []) + (msg.caption_entities or [])
+    has_entity_link = any(e.type in ("url", "text_link") for e in entities)
+
+    # Avval entity tekshiradi, bo‘lmasa regex
+    has_link = has_entity_link or LINK_RE.search(text) or LINK_RE.search(caption)
+
+    if has_link:
         user = update.effective_user
         mention = user.mention_html()
 
