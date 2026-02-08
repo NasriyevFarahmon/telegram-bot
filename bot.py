@@ -20,10 +20,13 @@ LINK_RE = re.compile(r"(https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+)", re.I
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "Salom! Men guruhda tartib saqlash uchun ishlayman.\n\n"
-        "✅ Admin bo‘lmaganlar yuborgan linklarni o‘chiraman (text, video, audio, rasm, hujjat caption ichida ham).\n"
-        "✅ Guruhga kirdi/chiqdi xabarlarini avtomatik o‘chiraman.\n\n"
-        "Bot ishlashi uchun: guruhda ADMIN qiling va “Delete messages” huquqini bering."
+        "Салом! Ман барои нигоҳ доштани тартибот дар гурӯҳ фаъолият мекунам.
+
+Ман боти расмии @DehaiSarchashma мебошам."
+        "Вазифаҳои ман:
+✅ Истинодҳо (линкҳо)-ро нест мекунам: Агар аз ҷониби ғайриадминҳо фиристода шаванд (дар матн, видео, аудио, акс ва шарҳи файлҳо).
+
+✅ Паёмҳои «даромад/баромад»-ро: Ба таври худкор (автоматӣ) аз гурӯҳ тоза мекунам."
     )
     await update.message.reply_text(text)
 
@@ -87,7 +90,7 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Ogohlantirish yuboramiz
-    warn_text = f"{mention} siz guruhda link yubordingiz, shuning uchun ushbu xabar o‘chirildi."
+    warn_text = f"{mention} фиристодани линк манъ аст! Ман боти расмии @DehaiSarchashma мебошам ва паёми шуморо нест кардам."
     warn_msg = await context.bot.send_message(
         chat_id=chat_id,
         text=warn_text,
