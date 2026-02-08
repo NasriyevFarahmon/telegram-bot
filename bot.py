@@ -1,78 +1,61 @@
 import os
 import re
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
 
-# Barcha linklar: http(s), t.me, www, va oddiy domain.tld ko‘rinishlari
-LINK_RE = re.compile(
-    r"("
-    r"https?://\S+"
-    r"|t\.me/\S+"
-    r"|www\.\S+"
-    r"|\b[\w-]+\.(?:com|ru|uz|net|org|info|io|me|tv|app|site)\b\S*"
-    r")",
-    re.IGNORECASE,
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN topilmadi")
+
+# har qanday linkni aniqlaydi
+link_pattern = re.compile(
+    r"(https?://|www\.|t\.me/|telegram\.me/)",
+    re.IGNORECASE
 )
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Салом! Ман истинодҳое (линкҳое), ки аз ҷониби ғайриадминҳо фиристода мешаванд ва паёмҳои «даромад/баромад»-ро нест мекунам. Ман боти расмии @DehaiSarchashma мебошам."
-    )
+# admin tekshiruv
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
 
-async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Xabar yuborgan user shu chat adminimi-yo‘qmi tekshiradi."""
-    if not update.message:
-        return False
-    chat_id = update.message.chat_id
-    user_id = update.message.from_user.id
     admins = await context.bot.get_chat_administrators(chat_id)
-    return any(a.user.id == user_id for a in admins)
+    admin_ids = [admin.user.id for admin in admins]
 
+    return user_id in admin_ids
+
+# link o‘chirish
 async def delete_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin bo‘lmagan user link yuborsa (text/caption), xabarni o‘chiradi."""
     if not update.message:
         return
 
-    # Admin bo‘lsa tegmaymiz
     if await is_admin(update, context):
         return
 
-    msg = update.message
-    text = msg.text or msg.caption or ""
-    if not text:
-        return
+    text = update.message.text or ""
+    caption = update.message.caption or ""
 
-    if LINK_RE.search(text):
+    if link_pattern.search(text) or link_pattern.search(caption):
         try:
-            await msg.delete()
-        except Exception:
+            await update.message.delete()
+        except:
             pass
 
-async def delete_join_left(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Guruhga kirish/chiqish service message’larini o‘chiradi."""
-    if not update.message:
-        return
+# join/leave o‘chirish
+async def delete_join_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.delete()
-    except Exception:
+    except:
         pass
 
 def main():
-    if not TOKEN:
-        raise RuntimeError("BOT_TOKEN topilmadi. PowerShell'da $env:BOT_TOKEN='...' qilib ishga tushiring.")
+    app = ApplicationBuilder().token(TOKEN).build()
 
-    app = Application.builder().token(TOKEN).build()
+    # barcha turdagi xabarlar
+    app.add_handler(MessageHandler(filters.ALL, delete_links))
 
-    app.add_handler(CommandHandler("start", start))
-
-    # Kirdi/chiqdi service messages:
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, delete_join_left))
-    app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, delete_join_left))
-
-    # Linklar (oddiy text + media caption):
-    app.add_handler(MessageHandler(filters.TEXT | filters.Caption(True), delete_links))
+    # kirdi/chiqdi
+    app.add_handler(MessageHandler(filters.StatusUpdate.ALL, delete_join_leave))
 
     app.run_polling()
 
