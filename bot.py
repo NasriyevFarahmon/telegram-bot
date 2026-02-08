@@ -1,63 +1,133 @@
 import os
 import re
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from telegram.constants import ParseMode
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
 TOKEN = os.getenv("BOT_TOKEN")
-
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN topilmadi")
 
-# HAR QANDAY LINK
-LINK_RE = re.compile(
-    r"(https?://\S+|www\.\S+|t\.me/\S+)",
-    re.IGNORECASE
-)
+# Regex (fallback) — entity bo‘lmasa ham linkni ushlash uchun
+LINK_RE = re.compile(r"(https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+)", re.IGNORECASE)
 
-# ADMIN TEKSHIRUV
-async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "Salom! Men guruhda tartib saqlash uchun ishlayman.\n\n"
+        "✅ Admin bo‘lmaganlar yuborgan linklarni o‘chiraman (text, video, audio, rasm, hujjat caption ichida ham).\n"
+        "✅ Guruhga kirdi/chiqdi xabarlarini avtomatik o‘chiraman.\n\n"
+        "Bot ishlashi uchun: guruhda ADMIN qiling va “Delete messages” huquqini bering."
+    )
+    await update.message.reply_text(text)
+
+
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-
     admins = await context.bot.get_chat_administrators(chat_id)
-    admin_ids = [a.user.id for a in admins]
+    return any(a.user.id == user_id for a in admins)
 
-    return user_id in admin_ids
 
-# LINK O‘CHIRISH
+def has_link(update: Update) -> bool:
+    """Text/caption ichida link bormi? (entities + regex)"""
+    msg = update.message
+    if not msg:
+        return False
+
+    # 1) Telegram entities orqali (eng ishonchli)
+    entities = (msg.entities or []) + (msg.caption_entities or [])
+    if any(e.type in ("url", "text_link") for e in entities):
+        return True
+
+    # 2) Regex fallback
+    text = msg.text or ""
+    caption = msg.caption or ""
+    return bool(LINK_RE.search(text) or LINK_RE.search(caption))
+
+
+async def delete_warning_job(context: ContextTypes.DEFAULT_TYPE):
+    """JobQueue orqali ogohlantirish xabarini keyinroq o‘chirish."""
+    data = context.job.data
+    chat_id = data["chat_id"]
+    message_id = data["message_id"]
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        pass
+
+
 async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
 
+    # Admin bo‘lsa tegmaymiz
     if await is_admin(update, context):
         return
 
-    text = update.message.text or ""
-    caption = update.message.caption or ""
+    # Link bormi?
+    if not has_link(update):
+        return
 
-    if LINK_RE.search(text) or LINK_RE.search(caption):
-        try:
-            await update.message.delete()
-        except:
-            pass
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    mention = user.mention_html()  # HTML mention
 
-# KIRDI/CHIQDI O‘CHIRISH
-async def delete_service(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Avval linkli xabarni o‘chiramiz
     try:
         await update.message.delete()
-    except:
+    except Exception:
+        # Delete messages huquqi bo‘lmasa o‘chira olmaydi
+        return
+
+    # Ogohlantirish yuboramiz
+    warn_text = f"{mention} siz guruhda link yubordingiz, shuning uchun ushbu xabar o‘chirildi."
+    warn_msg = await context.bot.send_message(
+        chat_id=chat_id,
+        text=warn_text,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+    # 10 soniyadan keyin ogohlantirishni ham o‘chirib yuboramiz (spam bo‘lmasin)
+    context.job_queue.run_once(
+        delete_warning_job,
+        when=10,
+        data={"chat_id": chat_id, "message_id": warn_msg.message_id},
+    )
+
+
+async def delete_join_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kirdi/chiqdi service message’larini o‘chiradi."""
+    if not update.message:
+        return
+    try:
+        await update.message.delete()
+    except Exception:
         pass
+
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # BARCHA XABARLAR (video/audio ham)
+    # /start javobi
+    app.add_handler(CommandHandler("start", start))
+
+    # Kirdi/chiqdi
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, delete_join_leave))
+    app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, delete_join_leave))
+
+    # Anti-link: barcha turdagi xabarlarda tekshiradi (video/audio/photo/doc/caption ham)
     app.add_handler(MessageHandler(filters.ALL, anti_link))
 
-    # JOIN/LEAVE
-    app.add_handler(MessageHandler(filters.StatusUpdate.ALL, delete_service))
-
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
