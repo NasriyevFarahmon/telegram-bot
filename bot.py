@@ -13,113 +13,142 @@ from telegram.ext import (
     filters,
 )
 
-# Logging sozlamalari
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(name)s", level=logging.INFO)
-logger = logging.getLogger("antilink-bot")
-
+# Sozlamalar
+logging.basicConfig(format="%(asctime)s - %(name)s - %(message)s", level=logging.INFO)
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = os.getenv("ADMIN_ID") # Bot egasining ID raqami
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0")) # Bot egasining ID si
+CHANNEL_ID = "@SizningKanalUseri" # Kanal usernamesi yoki ID si
 
-LINK_RE = re.compile(
-    r"(https?://|www\.|t\.me/|telegram\.me/|instagr\.am/|instagram\.com/|tiktok\.com/)",
-    re.IGNORECASE,
-)
+# Ma'lumotlarni saqlash (Vaqtinchalik bazacha)
+# {message_id: [user_id1, user_id2]} ko'rinishida saqlaydi
+likes_data = {}
 
-# --- Like Tizimi Funksiyalari ---
+LINK_RE = re.compile(r"(https?://|www\.|t\.me/|telegram\.me/|instagr\.am/|instagram\.com/|tiktok\.com/)", re.IGNORECASE)
 
-async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kanalga post tashlanganda like tugmasini qo'shish"""
-    channel_post = update.channel_post
-    
-    # Like tugmasi (boshlang'ich qiymat 0)
+# --- POST YARATISH (ADMIN UCHUN) ---
+
+async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin botga biror narsa yozsa, uni kanalga yuborish variantini taklif qiladi"""
+    if update.effective_user.id != ADMIN_ID:
+        return # Admin bo'lmasa e'tiborsiz qoldiramiz
+
+    if update.message.text or update.message.caption:
+        keyboard = [[InlineKeyboardButton("✅ Kanalga yuborish", callback_data="send_to_channel")]]
+        await update.message.reply_text(
+            "Ushbu xabarni kanalga layk tugmasi bilan yubormoqchimisiz?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        # Xabarni keyinroq yuborish uchun contextda saqlab turamiz
+        context.user_data['pending_post'] = update.message
+
+async def send_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin 'Yubor' tugmasini bossa, xabarni kanalga chiqaradi"""
+    query = update.callback_query
+    pending_msg = context.user_data.get('pending_post')
+
+    if not pending_msg:
+        await query.answer("Xabar topilmadi, qaytadan yuboring.")
+        return
+
+    # Layk tugmasi bilan kanalga yuborish
     keyboard = [[InlineKeyboardButton("❤️ 0", callback_data="like_0")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
-        await context.bot.edit_message_reply_markup(
-            chat_id=channel_post.chat_id,
-            message_id=channel_post.message_id,
-            reply_markup=reply_markup
-        )
+        if pending_msg.text:
+            sent_msg = await context.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=pending_msg.text,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            sent_msg = await context.bot.copy_message(
+                chat_id=CHANNEL_ID,
+                from_chat_id=pending_msg.chat_id,
+                message_id=pending_msg.message_id,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        
+        likes_data[sent_msg.message_id] = [] # Bu post uchun bo'sh ro'yxat ochamiz
+        await query.edit_message_text("✅ Xabar kanalga muvaffaqiyatli yuborildi!")
     except Exception as e:
-        logger.error(f"Kanal postiga tugma qo'shishda xato: {e}")
+        await query.edit_message_text(f"❌ Xatolik yuz berdi: {e}")
+
+# --- LAYK BOSISH LOGIKASI ---
 
 async def like_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Like bosilganda hisoblagichni yangilash va adminga xabar yuborish"""
     query = update.callback_query
+    user_id = query.from_user.id
+    msg_id = query.message.message_id
     data = query.data
+
+    if not data.startswith("like_"):
+        return
+
+    # Post uchun layk ro'yxatini tekshirish
+    if msg_id not in likes_data:
+        likes_data[msg_id] = []
+
+    if user_id in likes_data[msg_id]:
+        await query.answer("Siz oldin layk bosgansiz!", show_alert=True)
+        return
+
+    # Yangi laykni qayd etish
+    likes_data[msg_id].append(user_id)
+    count = len(likes_data[msg_id])
     
-    if data.startswith("like_"):
-        current_likes = int(data.split("_")[1])
-        new_likes = current_likes + 1
-        
-        # Tugmani yangilash
-        keyboard = [[InlineKeyboardButton(f"❤️ {new_likes}", callback_data=f"like_{new_likes}")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        try:
-            await query.edit_message_reply_markup(reply_markup=reply_markup)
-            await query.answer("Rahmat!") # Userga kichik xabar
+    keyboard = [[InlineKeyboardButton(f"❤️ {count}", callback_data=f"like_{count}")]]
+    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.answer("Qo'llaganingiz uchun rahmat!")
 
-            # Bot egasiga xabar yuborish
-            if ADMIN_ID:
-                post_link = f"https://t.me/c/{str(query.message.chat.id)[4:]}/{query.message.message_id}"
-                await context.bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text=f"🔔 <b>Yangi Like!</b>\n\nPost: {post_link}\nJami likelar: {new_likes}",
-                    parse_mode=ParseMode.HTML
-                )
-        except Exception as e:
-            logger.error(f"Like yangilashda xato: {e}")
+    # Adminga doimiy xabar
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=f"📊 Post #{msg_id} da yangi layk!\nJami: {count} ta"
+    )
 
-# --- Avvalgi Funksiyalar (Anti-link) ---
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Салом! Ман боти расмии @DehaiSarchashma мебошам.")
-
-async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        if update.effective_message.sender_chat or update.effective_chat.type == "private":
-            return True
-        user_id = update.effective_user.id
-        if user_id == 1087968824: return True
-        member = await context.bot.get_chat_member(update.effective_chat.id, user_id)
-        return member.status in ("administrator", "creator")
-    except: return False
+# --- ANTI-LINK VA STATUS O'CHIRISH (GURUH UCHUN) ---
 
 async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    if not msg or await is_admin(update, context): return
+    if not msg or update.effective_chat.type == "private": return
+
+    # Adminlarni tekshirish
+    if msg.sender_chat: return # Kanal nomidan kelgan xabar
+    try:
+        member = await context.bot.get_chat_member(msg.chat_id, msg.from_user.id)
+        if member.status in ("administrator", "creator"): return
+    except: pass
 
     text = (msg.text or "") + (msg.caption or "")
-    if LINK_RE.search(text) or any(e.type in ("url", "text_link") for e in (msg.entities or [])):
+    if LINK_RE.search(text):
         try:
             await msg.delete()
-            warn = await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"Ҳурматӣ {update.effective_user.mention_html()}, линк фиристодан мумкин нест!",
-                parse_mode=ParseMode.HTML
-            )
-            asyncio.create_task(delete_after_delay(warn, 15))
         except: pass
 
-async def delete_after_delay(msg, delay):
-    await asyncio.sleep(delay)
-    try: await msg.delete()
-    except: pass
+async def delete_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Guruhga kirdi-chiqdi xabarlarini o'chirish"""
+    try:
+        await update.message.delete()
+    except:
+        pass
+
+# --- ASOSIY QISM ---
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # Handlers
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(like_callback)) # Like bosilganda
-    app.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_channel_post)) # Kanalda post bo'lganda
+    # Admin xabarlarini ushlash (Faqat shaxsiyda)
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_admin_message))
+    app.add_handler(CallbackQueryHandler(send_to_channel, pattern="^send_to_channel$"))
     
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & ~filters.StatusUpdate.ALL, anti_link))
+    # Layk tugmasi
+    app.add_handler(CallbackQueryHandler(like_callback, pattern="^like_"))
 
-    logger.info("Bot ishga tushdi...")
-    app.run_polling(drop_pending_updates=True)
+    # Guruh uchun Anti-link va Status o'chirish
+    app.add_handler(MessageHandler(filters.StatusUpdate.ALL, delete_status))
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, anti_link))
+
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
