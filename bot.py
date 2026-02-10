@@ -65,7 +65,6 @@ async def like_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data_parts = query.data.split("_")
     target_channel_id = int(data_parts[2]) if len(data_parts) > 2 else msg.chat_id
 
-    # Obunani tekshirish
     try:
         member = await context.bot.get_chat_member(chat_id=target_channel_id, user_id=user.id)
         if member.status not in ["member", "administrator", "creator"]:
@@ -79,14 +78,13 @@ async def like_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     likes_data[msg.message_id].append(user.id)
-    count = len(likes_data[msg_id := msg.message_id])
+    count = len(likes_data[msg.message_id])
     keyboard = [[InlineKeyboardButton(f"❤️ {count}", callback_data=f"like_{count}_{target_channel_id}")]]
     
     try:
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
         await query.answer("Ташаккур!🤩")
 
-        # ADMIN UCHUN MA'LUMOT (To'liq formatda)
         post_link = f"https://t.me/c/{str(target_channel_id)[4:]}/{msg.message_id}"
         user_name = f"[{user.full_name}](tg://user?id={user.id})"
         channel_name = next((name for name, cid in CHANNELS.items() if cid == target_channel_id), "Канал")
@@ -109,16 +107,29 @@ async def like_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg or update.effective_chat.type == "private": return
+    
     text = (msg.text or "") + (msg.caption or "")
     if LINK_RE.search(text):
         try:
+            # Adminlarni tekshirish (ularga ruxsat bor)
             member = await context.bot.get_chat_member(msg.chat_id, msg.from_user.id)
             if member.status in ["administrator", "creator"]: return
+            
+            # Havolali xabarni o'chirish
             await msg.delete()
-            warn = await msg.reply_text(f"⚠️ **Илтимос {msg.from_user.mention_markdown()}!**\n🚫 Истинод манъ аст! Mан боти расмии @DehaiSarchashma ҳастам")
+            
+            # Ogohlantirish yuborish (Markdown bilan)
+            warn = await context.bot.send_message(
+                chat_id=msg.chat_id,
+                text=f"⚠️ **Илтимос {msg.from_user.mention_markdown()}!**\n🚫 Истинод манъ аст! Mан боти расмии @DehaiSarchashma ҳастам",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            # 15 soniya kutish va ogohlantirishni o'chirish
             await asyncio.sleep(15)
             await warn.delete()
-        except: pass
+        except Exception as e:
+            logging.error(f"Anti-link error: {e}")
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
