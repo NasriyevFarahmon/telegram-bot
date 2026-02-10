@@ -94,7 +94,7 @@ async def like_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
-        await query.answer("Ташаккур барои овоз доданатон ба озмуни "Наврӯз"!🤩")
+        await query.answer('Ташаккур барои овоз доданатон ба озмуни "Наврӯз"!🤩')
         
         # --- ADMIN UCHUN XABARNOMA QISMI ---
         post_link = f"https://t.me/c/{str(target_channel_id)[4:]}/{msg.message_id}"
