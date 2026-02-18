@@ -18,7 +18,7 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # --- KONFIGURATSIYA ---
 TOKEN = os.getenv("BOT_TOKEN")
-ADMINS = [5428723441] 
+ADMINS = [5428723441, 1375783491] 
 
 CHANNELS = {
     "📢 Dehai Sarchashma": -1001475810273,
