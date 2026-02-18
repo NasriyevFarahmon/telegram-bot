@@ -85,7 +85,7 @@ async def like_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if msg.message_id not in likes_data: likes_data[msg.message_id] = []
     if user.id in likes_data[msg.message_id]:
-        await query.answer("Шумо аллакай лайк мондаед! 😊", show_alert=True)
+        await query.answer("Ба озмуни Наврўз шумо аллакай лайк мондаед! 😊", show_alert=True)
         return
 
     likes_data[msg.message_id].append(user.id)
